@@ -1,0 +1,99 @@
+# name: test/sql/tick_bounds.test
+# description: tick_in adds an overall [first, last) range, as plain comparisons any scanner can push down
+# group: [sql]
+
+require tick
+
+require icu
+
+statement ok
+SET active_grammar_extensions = ['tick'];
+
+statement ok
+SET TimeZone = 'UTC';
+
+statement ok
+CREATE TABLE trades AS
+SELECT TIMESTAMP '2024-01-01' + INTERVAL (i) MINUTE AS ts, i AS v FROM range(527040) t(i);
+
+# the scan receives the bounding comparisons alongside tick_in
+query II
+EXPLAIN SELECT count(*) FROM trades WHERE ts IN '[2024-03]T09:30#workday;6h30m';
+----
+physical_plan	<REGEX>:.*ts >= '2024-03-01 09:30:00'::TIMESTAMP.*
+
+query II
+EXPLAIN SELECT count(*) FROM trades WHERE ts IN '[2024-03]T09:30#workday;6h30m';
+----
+physical_plan	<REGEX>:.*ts < '2024-03-29 16:00:00'::TIMESTAMP.*
+
+query II
+EXPLAIN SELECT count(*) FROM trades WHERE ts IN '[2024-03]T09:30#workday;6h30m';
+----
+physical_plan	<REGEX>:.*tick_in\(ts, .*
+
+# results are unchanged
+query I
+SELECT count(*) FROM trades WHERE ts IN '[2024-03]T09:30#workday;6h30m';
+----
+8190
+
+query I
+SELECT count(*) FROM trades WHERE ts NOT IN '[2024-03]T09:30#workday;6h30m';
+----
+518850
+
+query I
+SELECT count(*) FROM trades WHERE ts IN '2024-01-01#Tue';
+----
+0
+
+query I
+SELECT count(*) FROM trades WHERE ts NOT IN '2024-01-01#Tue';
+----
+527040
+
+query II
+SELECT NULL::TIMESTAMP IN '2024-01-15', NULL::TIMESTAMP NOT IN '2024-01-15';
+----
+NULL	NULL
+
+query I
+SELECT tick_in(TIMESTAMP '2024-01-15', NULL);
+----
+NULL
+
+# the bounds use the column's own type
+statement ok
+SET TimeZone = 'America/New_York';
+
+query II
+SELECT TIMESTAMPTZ '2024-01-15 04:59:59.999999+00' IN '2024-01-15', TIMESTAMPTZ '2024-01-15 05:00:00+00' IN '2024-01-15';
+----
+false	true
+
+query II
+SELECT TIMESTAMP_NS '2024-01-15 23:59:59.999999999' IN '2024-01-15', TIMESTAMP_NS '2024-01-16 00:00:00' IN '2024-01-15';
+----
+true	false
+
+query II
+SELECT '2024-01-15 04:59:59.999999999+00'::TIMESTAMPTZ_NS IN '2024-01-15',
+       '2024-01-15 05:00:00+00'::TIMESTAMPTZ_NS IN '2024-01-15';
+----
+false	true
+
+statement ok
+SET TimeZone = 'UTC';
+
+# a range reaching beyond the nanosecond limit
+query I
+SELECT TIMESTAMP_NS '2024-01-15 12:00:00' IN '[2024-01-15,2300-01-01]';
+----
+true
+
+# an expression on the left works too
+query I
+SELECT count(*) FROM trades WHERE ts + INTERVAL 1 DAY IN '2024-01-02';
+----
+1440

@@ -8,6 +8,9 @@
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb/main/extension/extension_loader.hpp"
+#include "duckdb/planner/expression/bound_comparison_expression.hpp"
+#include "duckdb/planner/expression/bound_conjunction_expression.hpp"
+#include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_function_expression.hpp"
 #include "duckdb/storage/statistics/numeric_stats.hpp"
 #include "duckdb/transaction/meta_transaction.hpp"
@@ -135,11 +138,52 @@ static FilterPropagateResult TickInFilterPrune(const FunctionStatisticsPruneInpu
 	return FilterPropagateResult::NO_PRUNING_POSSIBLE;
 }
 
+static Value MakeValue(timestamp_t value) {
+	return Value::TIMESTAMP(value);
+}
+
+static Value MakeValue(timestamp_tz_t value) {
+	return Value::TIMESTAMPTZ(value);
+}
+
+static Value MakeValue(timestamp_ns_t value) {
+	return Value::TIMESTAMPNS(value);
+}
+
+static Value MakeValue(timestamp_tz_ns_t value) {
+	return Value::TIMESTAMPTZNS(value);
+}
+
+//! Wraps tick_in in `x >= first AND x < last AND tick_in(...)`: scanners that cannot evaluate tick_in can still
+//! push down the two plain comparisons
+template <class T>
+static unique_ptr<Expression> TickInBindExpression(FunctionBindExpressionInput &input) {
+	if (!input.bind_data || input.children[0]->IsVolatile()) {
+		return nullptr;
+	}
+	auto &intervals = input.bind_data->Cast<TickInBindData>().intervals;
+	if (intervals.empty()) {
+		return nullptr;
+	}
+	auto &value = input.children[0];
+	auto lower = BoundComparisonExpression::Create(ExpressionType::COMPARE_GREATERTHANOREQUALTO, value->Copy(),
+	                                               make_uniq<BoundConstantExpression>(MakeValue(T(intervals.front().lo))));
+	auto upper = BoundComparisonExpression::Create(ExpressionType::COMPARE_LESSTHAN, value->Copy(),
+	                                               make_uniq<BoundConstantExpression>(MakeValue(T(intervals.back().hi))));
+	auto tick_in =
+	    make_uniq<BoundFunctionExpression>(input.bound_function, std::move(input.children), input.bind_data->Copy());
+	auto result =
+	    make_uniq<BoundConjunctionExpression>(ExpressionType::CONJUNCTION_AND, std::move(lower), std::move(upper));
+	result->GetChildrenMutable().push_back(std::move(tick_in));
+	return std::move(result);
+}
+
 template <class T, bool UTC, int64_t SCALE = 1>
 static ScalarFunction GetTickInFunction(const LogicalType &type) {
 	ScalarFunction function({type, LogicalType::VARCHAR}, LogicalType::BOOLEAN, TickInFunction<T>,
 	                        TickInBind<UTC, SCALE>);
 	function.SetFilterPruneCallback(TickInFilterPrune<T>);
+	function.SetBindExpressionCallback(TickInBindExpression<T>);
 	// depends on the transaction start time and the TimeZone setting
 	function.SetStability(FunctionStability::CONSISTENT_WITHIN_QUERY);
 	return function;

@@ -34,6 +34,12 @@ Table Scan  PARQUET_SCAN
   Row Groups Scanned: 1 / 52
 ```
 
+Some scanners (Arrow, and most scanners from other extensions such as Postgres or Iceberg) only accept plain
+comparisons. For them `x IN '<pattern>'` also carries the overall range of the expanded intervals, so it is
+planned as `x >= <first> AND x < <last> AND tick_in(x, '<pattern>')`. The comparisons use the column's own
+type and never change the result; they let those scanners skip data (or, for a remote database, filter at
+the source) whenever the pattern spans a limited stretch of time.
+
 ## Syntax
 
 Components appear in this order:
