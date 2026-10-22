@@ -1,0 +1,50 @@
+# name: test/sql/tick_timezone.test
+# description: patterns without @timezone are read in the session TimeZone
+# group: [sql]
+
+require tick
+
+require icu
+
+statement ok
+SET active_grammar_extensions = ['tick'];
+
+statement ok
+SET TimeZone = 'UTC';
+
+query II
+SELECT * FROM tick_intervals('2024-01-15');
+----
+2024-01-15 00:00:00+00	2024-01-16 00:00:00+00
+
+statement ok
+SET TimeZone = 'America/New_York';
+
+# TIMESTAMPTZ values are instants: the New York day starts at 05:00 UTC in winter
+query II
+SELECT TIMESTAMPTZ '2024-01-15 04:59:59+00' IN '2024-01-15', TIMESTAMPTZ '2024-01-15 05:00:00+00' IN '2024-01-15';
+----
+false	true
+
+# TIMESTAMP values are wall-clock times in the session zone
+query II
+SELECT TIMESTAMP '2024-01-15 00:00:00' IN '2024-01-15', TIMESTAMP '2024-01-14 23:59:59' IN '2024-01-15';
+----
+true	false
+
+statement ok
+SET TimeZone = 'UTC';
+
+query I
+SELECT lo FROM tick_intervals('2024-07-15');
+----
+2024-07-15 00:00:00+00
+
+statement ok
+SET TimeZone = 'Europe/Copenhagen';
+
+# summer: the Copenhagen day starts at 22:00 UTC the day before
+query I
+SELECT lo AT TIME ZONE 'UTC' FROM tick_intervals('2024-07-15');
+----
+2024-07-14 22:00:00

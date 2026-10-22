@@ -4,6 +4,8 @@
 #include "duckdb/common/types/date.hpp"
 #include "duckdb/common/types/timestamp.hpp"
 
+#include <algorithm>
+
 namespace duckdb {
 
 static bool TryParseDigits(const string &text, idx_t &pos, idx_t count, int32_t &result) {
@@ -37,13 +39,29 @@ static bool TryParseDay(const string &text, date_t &result) {
 	return true;
 }
 
-vector<TickInterval> ExpandTickPattern(const string &pattern) {
+void MergeTickIntervals(vector<TickInterval> &intervals) {
+	std::sort(intervals.begin(), intervals.end(),
+	          [](const TickInterval &a, const TickInterval &b) { return a.lo < b.lo; });
+	idx_t count = 0;
+	for (auto &interval : intervals) {
+		if (count > 0 && interval.lo <= intervals[count - 1].hi) {
+			intervals[count - 1].hi = MaxValue(intervals[count - 1].hi, interval.hi);
+		} else {
+			intervals[count++] = interval;
+		}
+	}
+	intervals.resize(count);
+}
+
+vector<TickInterval> ExpandTickPattern(const string &pattern, TickEnvironment &env) {
 	date_t day;
 	if (!TryParseDay(pattern, day)) {
 		throw InvalidInputException("Invalid TICK pattern: '%s'", pattern);
 	}
 	auto lo = Timestamp::FromDatetime(day, dtime_t(0)).value;
-	return {{lo, lo + Interval::MICROS_PER_DAY}};
+	vector<int64_t> bounds {lo, lo + Interval::MICROS_PER_DAY};
+	env.time_zones.LocalToUtc(env.time_zone, bounds);
+	return {{bounds[0], bounds[1]}};
 }
 
 } // namespace duckdb
