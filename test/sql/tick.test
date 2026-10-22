@@ -1,0 +1,10 @@
+# name: test/sql/tick.test
+# description: the tick extension loads
+# group: [sql]
+
+require tick
+
+query I
+SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'tick';
+----
+true
