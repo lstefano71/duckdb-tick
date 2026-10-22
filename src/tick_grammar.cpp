@@ -41,7 +41,8 @@ static arena_ptr<TransformProcess> StartInContainsExpression(PEGTransformer &tra
 class TickGrammarExtension final : public GrammarExtension {
 public:
 	TickGrammarExtension()
-	    : GrammarExtension(TICK_GRAMMAR_NAME, "QuestDB TICK interval syntax: x IN '<pattern>' becomes tick_in(x, ...)") {
+	    : GrammarExtension(TICK_GRAMMAR_NAME,
+	                       "QuestDB TICK interval syntax: x IN '<pattern>' becomes tick_in(x, ...)") {
 	}
 
 	vector<GrammarChange> GetChanges() const override {

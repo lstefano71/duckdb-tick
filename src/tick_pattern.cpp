@@ -189,8 +189,8 @@ int64_t AddParts(int64_t micros, const vector<DurationPart> &parts) {
 }
 
 bool IsDurationUnit(char c) {
-	return c == 'y' || c == 'M' || c == 'w' || c == 'd' || c == 'h' || c == 'm' || c == 's' || c == 'T' ||
-	       c == 'u' || c == 'n';
+	return c == 'y' || c == 'M' || c == 'w' || c == 'd' || c == 'h' || c == 'm' || c == 's' || c == 'T' || c == 'u' ||
+	       c == 'n';
 }
 
 //! Parses digits with '_' separators into `result`; returns false if they are malformed or too large
@@ -279,7 +279,7 @@ DayFilter ParseDayFilter(const string &text) {
 		return result;
 	}
 	static const char *const SHORT_NAMES[] = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"};
-	static const char *const LONG_NAMES[] = {"monday", "tuesday", "wednesday", "thursday",
+	static const char *const LONG_NAMES[] = {"monday", "tuesday",  "wednesday", "thursday",
 	                                         "friday", "saturday", "sunday"};
 	for (auto &name : StringUtil::Split(lower, ',')) {
 		if (name.empty()) {
@@ -341,6 +341,15 @@ int32_t IsoWeeksInYear(int32_t year) {
 	return (IsoWeekOneMonday(year + 1).days - IsoWeekOneMonday(year).days) / 7;
 }
 
+//! Advances past `c` if it is the next character
+bool Consume(const string &text, idx_t &pos, char c) {
+	if (pos < text.size() && text[pos] == c) {
+		pos++;
+		return true;
+	}
+	return false;
+}
+
 bool TryParseDatePart(const string &text, ParsedDate &result) {
 	idx_t pos = 0;
 	int32_t year, month, day;
@@ -351,11 +360,10 @@ bool TryParseDatePart(const string &text, ParsedDate &result) {
 		result = {Date::FromDate(year, 1, 1), Date::FromDate(year, 12, 31), DatePrecision::YEAR};
 		return true;
 	}
-	if (text[pos++] != '-') {
+	if (!Consume(text, pos, '-')) {
 		return false;
 	}
-	if (pos < text.size() && text[pos] == 'W') {
-		pos++;
+	if (Consume(text, pos, 'W')) {
 		int32_t week;
 		if (!TryParseFixedDigits(text, pos, 2, week) || week < 1 || week > IsoWeeksInYear(year)) {
 			return false;
@@ -366,7 +374,7 @@ bool TryParseDatePart(const string &text, ParsedDate &result) {
 			return true;
 		}
 		int32_t weekday;
-		if (text[pos++] != '-' || !TryParseFixedDigits(text, pos, 1, weekday) || weekday < 1 || weekday > 7 ||
+		if (!Consume(text, pos, '-') || !TryParseFixedDigits(text, pos, 1, weekday) || weekday < 1 || weekday > 7 ||
 		    pos != text.size()) {
 			return false;
 		}
@@ -382,7 +390,7 @@ bool TryParseDatePart(const string &text, ParsedDate &result) {
 		          DatePrecision::MONTH};
 		return true;
 	}
-	if (text[pos++] != '-' || !TryParseFixedDigits(text, pos, 2, day) || pos != text.size() ||
+	if (!Consume(text, pos, '-') || !TryParseFixedDigits(text, pos, 2, day) || pos != text.size() ||
 	    !Date::IsValid(year, month, day)) {
 		return false;
 	}
@@ -791,8 +799,8 @@ private:
 		if (end_text.empty()) {
 			Fail("Empty end expression in date range");
 		}
-		ProcessRange(EvaluateVariable(element.substr(0, range)), EvaluateVariable(end_text), end_text, suffix,
-		             filter, time_zone);
+		ProcessRange(EvaluateVariable(element.substr(0, range)), EvaluateVariable(end_text), end_text, suffix, filter,
+		             time_zone);
 	}
 
 	void ProcessVariable(int64_t value, const string &suffix, const DayFilter &filter, const string &time_zone) {
@@ -805,8 +813,8 @@ private:
 		AddWithDuration(value, value, filter, time_zone, false);
 	}
 
-	void ProcessRange(int64_t start, int64_t end, const string &end_text, const string &suffix,
-	                  const DayFilter &filter, const string &time_zone) {
+	void ProcessRange(int64_t start, int64_t end, const string &end_text, const string &suffix, const DayFilter &filter,
+	                  const string &time_zone) {
 		if (start > end) {
 			Fail("Invalid date range: start is after end");
 		}
@@ -914,8 +922,7 @@ private:
 	}
 
 	//! A date (with brackets, a time, or both) and its shared time suffix
-	void ProcessStatic(const string &element, const string &suffix, const DayFilter &filter,
-	                   const string &time_zone) {
+	void ProcessStatic(const string &element, const string &suffix, const DayFilter &filter, const string &time_zone) {
 		auto text = FindTimeStart(element) == string::npos ? element + suffix : element;
 		vector<ExpandedText> expanded;
 		ExpandBrackets(string(), text, string(), expanded);

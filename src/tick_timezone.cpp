@@ -125,7 +125,7 @@ private:
 						writer.WriteValue(timestamp_t(values[offset + i]));
 					}
 				}
-				input.SetCardinality(count);
+				input.CheckCardinality(count);
 				Vector result(expr->GetReturnType(), count);
 				executor.ExecuteExpression(input, result);
 				idx_t i = 0;

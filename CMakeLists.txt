@@ -7,13 +7,16 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 
 project(${TARGET_NAME})
 
-set(CMAKE_CXX_STANDARD "17" CACHE STRING "C++ standard to enforce")
+set(CMAKE_CXX_STANDARD
+    "17"
+    CACHE STRING "C++ standard to enforce")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/tick_extension.cpp src/tick_functions.cpp src/tick_grammar.cpp
-                      src/tick_pattern.cpp src/tick_timezone.cpp)
+set(EXTENSION_SOURCES
+    src/tick_extension.cpp src/tick_functions.cpp src/tick_grammar.cpp
+    src/tick_pattern.cpp src/tick_timezone.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})

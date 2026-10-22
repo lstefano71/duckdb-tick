@@ -166,10 +166,12 @@ static unique_ptr<Expression> TickInBindExpression(FunctionBindExpressionInput &
 		return nullptr;
 	}
 	auto &value = input.children[0];
-	auto lower = BoundComparisonExpression::Create(ExpressionType::COMPARE_GREATERTHANOREQUALTO, value->Copy(),
-	                                               make_uniq<BoundConstantExpression>(MakeValue(T(intervals.front().lo))));
-	auto upper = BoundComparisonExpression::Create(ExpressionType::COMPARE_LESSTHAN, value->Copy(),
-	                                               make_uniq<BoundConstantExpression>(MakeValue(T(intervals.back().hi))));
+	auto lower =
+	    BoundComparisonExpression::Create(ExpressionType::COMPARE_GREATERTHANOREQUALTO, value->Copy(),
+	                                      make_uniq<BoundConstantExpression>(MakeValue(T(intervals.front().lo))));
+	auto upper =
+	    BoundComparisonExpression::Create(ExpressionType::COMPARE_LESSTHAN, value->Copy(),
+	                                      make_uniq<BoundConstantExpression>(MakeValue(T(intervals.back().hi))));
 	auto tick_in =
 	    make_uniq<BoundFunctionExpression>(input.bound_function, std::move(input.children), input.bind_data->Copy());
 	auto result =
@@ -198,8 +200,8 @@ static unique_ptr<Expression> TickInStringBindExpression(FunctionBindExpressionI
 	vector<unique_ptr<Expression>> children;
 	children.push_back(std::move(input.children[1]));
 	children.push_back(std::move(input.children[0]));
-	return FunctionBinder(input.context).BindScalarFunction(Identifier::DefaultSchema(), "contains",
-	                                                        std::move(children));
+	return FunctionBinder(input.context)
+	    .BindScalarFunction(Identifier::DefaultSchema(), "contains", std::move(children));
 }
 
 struct TickIntervalsBindData final : public TableFunctionData {
@@ -237,7 +239,7 @@ static void TickIntervalsFunction(ClientContext &context, TableFunctionInput &da
 			hi_writer.WriteValue(timestamp_tz_t(intervals[state.offset + i].hi));
 		}
 	}
-	output.SetCardinality(count);
+	output.CheckCardinality(count);
 	state.offset += count;
 }
 
@@ -252,8 +254,7 @@ void RegisterTickFunctions(ExtensionLoader &loader) {
 	tick_in.AddFunction(GetTickInFunction<timestamp_ns_t, false, Interval::NANOS_PER_MICRO>(LogicalType::TIMESTAMP_NS));
 	tick_in.AddFunction(
 	    GetTickInFunction<timestamp_tz_ns_t, true, Interval::NANOS_PER_MICRO>(LogicalType::TIMESTAMP_TZ_NS));
-	ScalarFunction string_fun({LogicalType::VARCHAR, LogicalType::VARCHAR}, LogicalType::BOOLEAN,
-	                          TickInStringFunction);
+	ScalarFunction string_fun({LogicalType::VARCHAR, LogicalType::VARCHAR}, LogicalType::BOOLEAN, TickInStringFunction);
 	string_fun.SetBindExpressionCallback(TickInStringBindExpression);
 	tick_in.AddFunction(string_fun);
 	loader.RegisterFunction(tick_in);
