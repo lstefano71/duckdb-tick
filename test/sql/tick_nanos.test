@@ -1,0 +1,71 @@
+# name: test/sql/tick_nanos.test
+# description: tick_in on nanosecond timestamps
+# group: [sql]
+
+require tick
+
+require icu
+
+require parquet
+
+statement ok
+SET active_grammar_extensions = ['tick'];
+
+statement ok
+SET TimeZone = 'UTC';
+
+query III
+SELECT TIMESTAMP_NS '2024-01-15 00:00:00' IN '2024-01-15',
+       TIMESTAMP_NS '2024-01-15 23:59:59.999999999' IN '2024-01-15',
+       TIMESTAMP_NS '2024-01-16 00:00:00' IN '2024-01-15';
+----
+true	true	false
+
+# a point matches every nanosecond of its microsecond
+statement ok
+SET tick_now = '2026-01-22 10:30:00+00';
+
+query II
+SELECT TIMESTAMP_NS '2026-01-22 10:30:00.000000999' IN '$now', TIMESTAMP_NS '2026-01-22 10:30:00.000001' IN '$now';
+----
+true	false
+
+statement ok
+SET TimeZone = 'America/New_York';
+
+# TIMESTAMP_NS values are wall-clock times in the session zone
+query II
+SELECT TIMESTAMP_NS '2024-01-15 00:00:00' IN '2024-01-15', TIMESTAMP_NS '2024-01-14 23:59:59.999999999' IN '2024-01-15';
+----
+true	false
+
+# TIMESTAMPTZ values with nanoseconds are instants
+query II
+SELECT '2024-01-15 04:59:59.999999999+00'::TIMESTAMPTZ_NS IN '2024-01-15',
+       '2024-01-15 05:00:00+00'::TIMESTAMPTZ_NS IN '2024-01-15';
+----
+false	true
+
+statement ok
+SET TimeZone = 'UTC';
+
+# far beyond the nanosecond range: no overflow
+query I
+SELECT TIMESTAMP_NS '2024-01-15 12:00:00' IN '[2024-01-15,2300-01-01]';
+----
+true
+
+# row groups are pruned on the nanosecond column itself, without a cast
+statement ok
+COPY (SELECT (TIMESTAMP '2024-01-01' + INTERVAL (i) MINUTE)::TIMESTAMP_NS AS ts FROM range(527040) t(i))
+TO '__TEST_DIR__/tick_nanos.parquet' (ROW_GROUP_SIZE 10000);
+
+query I
+SELECT count(*) FROM '__TEST_DIR__/tick_nanos.parquet' WHERE ts IN '2024-03-15';
+----
+1440
+
+query II
+EXPLAIN ANALYZE SELECT count(*) FROM '__TEST_DIR__/tick_nanos.parquet' WHERE ts IN '2024-03-15';
+----
+analyzed_plan	<REGEX>:.*tick_in\(ts, '2024-03-15'\).*Row Groups Scanned: 1 /.*

@@ -76,7 +76,19 @@ struct TickInBindData final : public FunctionData {
 	}
 };
 
-template <bool UTC>
+//! Multiplies, saturating at the int64 range
+static int64_t ScaleSaturating(int64_t value, int64_t scale) {
+	if (value > NumericLimits<int64_t>::Maximum() / scale) {
+		return NumericLimits<int64_t>::Maximum();
+	}
+	if (value < NumericLimits<int64_t>::Minimum() / scale) {
+		return NumericLimits<int64_t>::Minimum();
+	}
+	return value * scale;
+}
+
+//! SCALE converts the microsecond intervals to the unit of the column (1000 for nanoseconds)
+template <bool UTC, int64_t SCALE>
 static unique_ptr<FunctionData> TickInBind(BindScalarFunctionInput &input) {
 	auto pattern = input.TryGetConstant(1);
 	if (!pattern) {
@@ -86,7 +98,13 @@ static unique_ptr<FunctionData> TickInBind(BindScalarFunctionInput &input) {
 		return make_uniq<TickInBindData>(vector<TickInterval>());
 	}
 	auto &context = input.GetClientContext();
-	return make_uniq<TickInBindData>(ExpandForContext(context, StringValue::Get(*pattern), UTC));
+	auto intervals = ExpandForContext(context, StringValue::Get(*pattern), UTC);
+	if (SCALE != 1) {
+		for (auto &interval : intervals) {
+			interval = {ScaleSaturating(interval.lo, SCALE), ScaleSaturating(interval.hi, SCALE)};
+		}
+	}
+	return make_uniq<TickInBindData>(std::move(intervals));
 }
 
 template <class T>
@@ -117,9 +135,10 @@ static FilterPropagateResult TickInFilterPrune(const FunctionStatisticsPruneInpu
 	return FilterPropagateResult::NO_PRUNING_POSSIBLE;
 }
 
-template <class T, bool UTC>
+template <class T, bool UTC, int64_t SCALE = 1>
 static ScalarFunction GetTickInFunction(const LogicalType &type) {
-	ScalarFunction function({type, LogicalType::VARCHAR}, LogicalType::BOOLEAN, TickInFunction<T>, TickInBind<UTC>);
+	ScalarFunction function({type, LogicalType::VARCHAR}, LogicalType::BOOLEAN, TickInFunction<T>,
+	                        TickInBind<UTC, SCALE>);
 	function.SetFilterPruneCallback(TickInFilterPrune<T>);
 	// depends on the transaction start time and the TimeZone setting
 	function.SetStability(FunctionStability::CONSISTENT_WITHIN_QUERY);
@@ -186,6 +205,9 @@ void RegisterTickFunctions(ExtensionLoader &loader) {
 	ScalarFunctionSet tick_in("tick_in");
 	tick_in.AddFunction(GetTickInFunction<timestamp_t, false>(LogicalType::TIMESTAMP));
 	tick_in.AddFunction(GetTickInFunction<timestamp_tz_t, true>(LogicalType::TIMESTAMP_TZ));
+	tick_in.AddFunction(GetTickInFunction<timestamp_ns_t, false, Interval::NANOS_PER_MICRO>(LogicalType::TIMESTAMP_NS));
+	tick_in.AddFunction(
+	    GetTickInFunction<timestamp_tz_ns_t, true, Interval::NANOS_PER_MICRO>(LogicalType::TIMESTAMP_TZ_NS));
 	ScalarFunction string_fun({LogicalType::VARCHAR, LogicalType::VARCHAR}, LogicalType::BOOLEAN,
 	                          TickInStringFunction);
 	string_fun.SetBindExpressionCallback(TickInStringBindExpression);

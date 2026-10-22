@@ -83,8 +83,11 @@ Not supported: exchange calendars (`#XNYS` and other ISO 10383 codes), a QuestDB
   statement — run `SET active_grammar_extensions = ['tick']` to enable it immediately.
 - **Time zones follow DuckDB.** Unlike QuestDB, which is UTC throughout, a pattern without `@timezone`
   is read in the session's `TimeZone` setting, and plain `TIMESTAMP` / `TIMESTAMP_NS` values are treated
-  as wall-clock times in that zone. `TIMESTAMPTZ` values are absolute instants. `SET TimeZone = 'UTC'`
-  gives QuestDB's behaviour.
+  as wall-clock times in that zone. `TIMESTAMPTZ` / `TIMESTAMPTZ_NS` values are absolute instants.
+  `SET TimeZone = 'UTC'` gives QuestDB's behaviour.
+- **Column types.** `TIMESTAMP`, `TIMESTAMPTZ` and their nanosecond variants are matched natively (and
+  pruned on their own statistics); `DATE`, `TIMESTAMP_S` and `TIMESTAMP_MS` are widened to `TIMESTAMP`.
+  Intervals keep microsecond precision, so a point such as `$now` covers all nanoseconds of its microsecond.
 - **`$now` / `$today`** are taken from the transaction start time, or from the `tick_now` setting when it is
   set (`SET tick_now = '2026-01-22 10:30:00+00'`), which makes results reproducible. Prepared statements
   expand the pattern again on every execution.
