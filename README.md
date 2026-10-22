@@ -1,5 +1,7 @@
 # tick — QuestDB TICK interval syntax for DuckDB
 
+> Disclaimer: yes, this extension was implemented almost single-handedly by a coding agent. If this disturbs you, search somewhere else. If it doesn't, make yourself at home.
+
 `tick` is a DuckDB extension that brings [QuestDB's TICK syntax](https://questdb.com/docs/query/operators/tick/)
 (Temporal Interval Calendar Kit) to DuckDB: one compact string describing many time windows, used directly
 in a `WHERE` clause.
