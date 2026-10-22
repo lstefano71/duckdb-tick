@@ -48,3 +48,38 @@ query I
 SELECT lo AT TIME ZONE 'UTC' FROM tick_intervals('2024-07-15');
 ----
 2024-07-14 22:00:00
+
+# $today is the current day in the session time zone: 03:00 UTC is still the 21st in New York
+statement ok
+SET TimeZone = 'America/New_York';
+
+statement ok
+SET tick_now = '2026-01-22 03:00:00+00';
+
+query II
+SELECT lo AT TIME ZONE 'UTC', hi AT TIME ZONE 'UTC' FROM tick_intervals('$today');
+----
+2026-01-21 05:00:00	2026-01-22 05:00:00
+
+# a prepared statement expands $now again on every execution
+statement ok
+SET TimeZone = 'UTC';
+
+statement ok
+PREPARE in_today AS SELECT TIMESTAMPTZ '2026-01-22 12:00:00+00' IN '$today';
+
+statement ok
+SET tick_now = '2026-01-22 10:00:00+00';
+
+query I
+EXECUTE in_today;
+----
+true
+
+statement ok
+SET tick_now = '2026-01-23 10:00:00+00';
+
+query I
+EXECUTE in_today;
+----
+false

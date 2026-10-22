@@ -66,7 +66,20 @@ public:
 			Shift(values, -offset);
 			return;
 		}
+		auto local = values;
 		Convert(tz, LogicalType::TIMESTAMP, values);
+		// an ambiguous wall-clock time (DST fall-back) resolves to the earlier, daylight-saving instant
+		vector<int64_t> earlier(values.size());
+		for (idx_t i = 0; i < values.size(); i++) {
+			earlier[i] = values[i] - Interval::MICROS_PER_HOUR;
+		}
+		auto round_trip = earlier;
+		Convert(tz, LogicalType::TIMESTAMP_TZ, round_trip);
+		for (idx_t i = 0; i < values.size(); i++) {
+			if (round_trip[i] == local[i]) {
+				values[i] = earlier[i];
+			}
+		}
 	}
 
 	void UtcToLocal(const string &tz, vector<int64_t> &values) override {

@@ -14,8 +14,8 @@ SELECT * FROM prices
 WHERE ts IN '[$today - 5bd..$today - 1bd]T09:30@America/New_York;1m';
 ```
 
-> **Status:** early development. The extension builds against DuckDB v2.0; the TICK grammar is being
-> implemented feature by feature. The sections below describe the intended behaviour.
+> **Status:** early development, built against DuckDB v2.0. The full TICK syntax is implemented and tested
+> against the cases in QuestDB's own test suite (see [docs/TICK_SEMANTICS.md](docs/TICK_SEMANTICS.md)).
 
 ## How it works
 
@@ -57,7 +57,21 @@ date [T time] @timezone #dayFilter ;duration
 Units: `y` `M` `w` `d` `h` `m` `s` `T` (ms) `u` (µs) `n` (ns); `bd` (business days) in arithmetic only.
 See the [QuestDB reference](https://questdb.com/docs/query/operators/tick/) for full semantics.
 
+Also accepted, as in QuestDB: full timestamps with fractions, ISO weeks with times, raw epoch microseconds,
+negative and multi-part durations, and the legacy repeating form `date;duration;period;count`.
+
 Not supported: exchange calendars (`#XNYS` and other ISO 10383 codes), a QuestDB Enterprise feature.
+
+### Differences from QuestDB
+
+- Variables (`$now`, `$today`, ...) and patterns without `@timezone` use the session `TimeZone`; QuestDB uses
+  UTC. With `SET TimeZone = 'UTC'` the results are the same.
+- A wall-clock time inside a DST gap moves forward by the gap (as DuckDB's own casts do); QuestDB snaps it to
+  the end of the gap.
+- Intervals are always merged; QuestDB leaves the days of `2024-W01#workday` separate.
+- ISO weeks accept a time or duration (`2024-W01T09:00`), which QuestDB rejects.
+- A pattern may expand to up to 1,000,000 intervals (QuestDB's default limit is 1,024).
+- Error messages carry no `[position]` prefix.
 
 ## DuckDB specifics
 
@@ -71,7 +85,9 @@ Not supported: exchange calendars (`#XNYS` and other ISO 10383 codes), a QuestDB
   is read in the session's `TimeZone` setting, and plain `TIMESTAMP` / `TIMESTAMP_NS` values are treated
   as wall-clock times in that zone. `TIMESTAMPTZ` values are absolute instants. `SET TimeZone = 'UTC'`
   gives QuestDB's behaviour.
-- **`$now` / `$today`** are taken from the transaction start time.
+- **`$now` / `$today`** are taken from the transaction start time, or from the `tick_now` setting when it is
+  set (`SET tick_now = '2026-01-22 10:30:00+00'`), which makes results reproducible. Prepared statements
+  expand the pattern again on every execution.
 - **Strings.** `'ell' IN 'hello'` (DuckDB's substring containment) keeps working for `VARCHAR` operands.
 
 The building blocks are also callable directly:

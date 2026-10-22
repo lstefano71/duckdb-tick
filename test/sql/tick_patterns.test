@@ -1,0 +1,850 @@
+# name: test/sql/tick_patterns.test
+# description: TICK pattern expansion, cases taken from QuestDB (docs/TICK_SEMANTICS.md); intervals are [lo, hi)
+# group: [sql]
+
+require tick
+
+require icu
+
+statement ok
+SET TimeZone = 'UTC';
+
+# QuestDB's tests use now = 2026-01-22T10:30Z, a Thursday
+statement ok
+SET tick_now = '2026-01-22 10:30:00+00';
+
+# --- dates and precision ---
+
+query II
+FROM tick_intervals('2016');
+----
+2016-01-01 00:00:00+00	2017-01-01 00:00:00+00
+
+query II
+FROM tick_intervals('2016-03');
+----
+2016-03-01 00:00:00+00	2016-04-01 00:00:00+00
+
+query II
+FROM tick_intervals('2016-03-21T10');
+----
+2016-03-21 10:00:00+00	2016-03-21 11:00:00+00
+
+query II
+FROM tick_intervals('2016-03-21T10:30');
+----
+2016-03-21 10:30:00+00	2016-03-21 10:31:00+00
+
+query II
+FROM tick_intervals('2016-03-21T10:30:40');
+----
+2016-03-21 10:30:40+00	2016-03-21 10:30:41+00
+
+query II
+FROM tick_intervals('2016-03-21T10:30:40.28');
+----
+2016-03-21 10:30:40.28+00	2016-03-21 10:30:40.29+00
+
+query II
+FROM tick_intervals('2016-03-21T10:30:40.100Z');
+----
+2016-03-21 10:30:40.1+00	2016-03-21 10:30:40.100001+00
+
+query II
+FROM tick_intervals('2018-01-[10,15] 10:30');
+----
+2018-01-10 10:30:00+00	2018-01-10 10:30:00.000001+00
+2018-01-15 10:30:00+00	2018-01-15 10:30:00.000001+00
+
+query II
+FROM tick_intervals('[2025-12-31]');
+----
+2025-12-31 00:00:00+00	2026-01-01 00:00:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('[2024-02]T09:30');
+----
+29
+
+query II
+FROM tick_intervals('2024-02T09:30') LIMIT 2;
+----
+2024-02-01 09:30:00+00	2024-02-01 09:31:00+00
+2024-02-02 09:30:00+00	2024-02-02 09:31:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('[2024]T09:30');
+----
+366
+
+query I
+SELECT count(*) FROM tick_intervals('[2100-02]T09:30');
+----
+28
+
+query I
+SELECT count(*) FROM tick_intervals('2024-[01..02]T09:30');
+----
+60
+
+query I
+SELECT count(*) FROM tick_intervals('[2024-01-15, 2024-02]T09:30');
+----
+30
+
+query I
+SELECT count(*) FROM tick_intervals('[2024]#workday;6h30m');
+----
+262
+
+statement error
+FROM tick_intervals('2016-02-30');
+----
+Invalid date: 2016-02-30
+
+statement error
+FROM tick_intervals('[2024-13]T09:30');
+----
+Invalid date
+
+statement error
+FROM tick_intervals('2016-03-21T10:69');
+----
+Invalid date
+
+statement error
+FROM tick_intervals('[2026-01-01t09:30]');
+----
+Invalid date
+
+# --- durations: replace the precision span, starting at lo ---
+
+query II
+FROM tick_intervals('2018-01-[10,15]T10:30;1h');
+----
+2018-01-10 10:30:00+00	2018-01-10 11:30:00+00
+2018-01-15 10:30:00+00	2018-01-15 11:30:00+00
+
+query II
+FROM tick_intervals('2024-01-15;1h');
+----
+2024-01-15 00:00:00+00	2024-01-15 01:00:00+00
+
+query II
+FROM tick_intervals('2024-01-15T00:00;1d12h');
+----
+2024-01-15 00:00:00+00	2024-01-16 12:00:00+00
+
+query II
+FROM tick_intervals('2024-01-15T10:00:00.000000;1_500T');
+----
+2024-01-15 10:00:00+00	2024-01-15 10:00:01.5+00
+
+query II
+FROM tick_intervals('[2024-01-01#Mon];3d');
+----
+2024-01-01 00:00:00+00	2024-01-04 00:00:00+00
+
+query II
+FROM tick_intervals('[2024-01]#workday;8h') LIMIT 2;
+----
+2024-01-01 00:00:00+00	2024-01-01 08:00:00+00
+2024-01-02 00:00:00+00	2024-01-02 08:00:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('[2024-01]T09:30#workday;6h30m');
+----
+23
+
+query II
+FROM tick_intervals('$now - 1h;30m');
+----
+2026-01-22 09:30:00+00	2026-01-22 10:00:00+00
+
+query II
+FROM tick_intervals('2018-01-[10,15]T00:00;-1h');
+----
+2018-01-09 23:00:00+00	2018-01-10 00:00:00+00
+2018-01-14 23:00:00+00	2018-01-15 00:00:00+00
+
+query II
+FROM tick_intervals('2025-01-15;-3d2h');
+----
+2025-01-12 02:00:00+00	2025-01-15 00:00:00+00
+
+query II
+FROM tick_intervals('2025-01-15;-3d-2h');
+----
+2025-01-11 22:00:00+00	2025-01-15 00:00:00+00
+
+query II
+FROM tick_intervals('2026-01;-3d');
+----
+2025-12-29 00:00:00+00	2026-01-31 00:00:00+00
+
+query II
+FROM tick_intervals('2026-03-31;-1M');
+----
+2026-02-28 00:00:00+00	2026-03-31 00:00:00+00
+
+query II
+FROM tick_intervals('2024-02-29;-1y');
+----
+2023-02-28 00:00:00+00	2024-02-29 00:00:00+00
+
+# a zero duration matches nothing
+query I
+SELECT count(*) FROM tick_intervals('2025-01-15T10:00:00;0d');
+----
+0
+
+query II
+FROM tick_intervals('2024-01-15T[09:00,10:30];2h');
+----
+2024-01-15 09:00:00+00	2024-01-15 12:30:00+00
+
+statement error
+FROM tick_intervals('2018-01-10;1x');
+----
+Invalid duration unit: x
+
+statement error
+FROM tick_intervals('2018-01-10;1h30');
+----
+Missing unit at end of duration
+
+statement error
+FROM tick_intervals('2018-01-10;h');
+----
+Expected number before unit 'h'
+
+# --- legacy repeating intervals: date;duration;period;count ---
+
+query II
+FROM tick_intervals('2018-01-10T10:30;30m;2h;3');
+----
+2018-01-10 10:30:00+00	2018-01-10 11:00:00+00
+2018-01-10 12:30:00+00	2018-01-10 13:00:00+00
+2018-01-10 14:30:00+00	2018-01-10 15:00:00+00
+
+query II
+FROM tick_intervals('2016-03-21;3y;6M;5');
+----
+2016-03-21 00:00:00+00	2021-03-21 00:00:00+00
+
+statement error
+FROM tick_intervals('2018-01-10T10:30;30m;2d');
+----
+Invalid interval format
+
+statement error
+FROM tick_intervals('2018-01-10T10:30;1s;1h;0');
+----
+Count must be positive
+
+# --- variables ---
+
+query II
+FROM tick_intervals('$today');
+----
+2026-01-22 00:00:00+00	2026-01-23 00:00:00+00
+
+query II
+FROM tick_intervals('[$yesterday, $tomorrow]');
+----
+2026-01-21 00:00:00+00	2026-01-22 00:00:00+00
+2026-01-23 00:00:00+00	2026-01-24 00:00:00+00
+
+query II
+FROM tick_intervals('$now');
+----
+2026-01-22 10:30:00+00	2026-01-22 10:30:00.000001+00
+
+query II
+FROM tick_intervals('[$now + 500T]');
+----
+2026-01-22 10:30:00.5+00	2026-01-22 10:30:00.500001+00
+
+query II
+FROM tick_intervals('[ $today   +   3 d ]');
+----
+2026-01-25 00:00:00+00	2026-01-26 00:00:00+00
+
+query II
+FROM tick_intervals('[$ToDay + 1BD]');
+----
+2026-01-23 00:00:00+00	2026-01-24 00:00:00+00
+
+query II
+FROM tick_intervals('[$today + 2bd]');
+----
+2026-01-26 00:00:00+00	2026-01-27 00:00:00+00
+
+query II
+FROM tick_intervals('[$today + 1_0bd]');
+----
+2026-02-05 00:00:00+00	2026-02-06 00:00:00+00
+
+# the time suffix is ignored for points
+query II
+FROM tick_intervals('[$now - 1h]T09:30');
+----
+2026-01-22 09:30:00+00	2026-01-22 09:30:00.000001+00
+
+query II
+FROM tick_intervals('$todayT09:30');
+----
+2026-01-22 09:30:00+00	2026-01-22 09:31:00+00
+
+query II
+FROM tick_intervals('$today@America/New_York');
+----
+2026-01-22 05:00:00+00	2026-01-23 05:00:00+00
+
+query II
+FROM tick_intervals('[$now, 2026-01-15]T09:00');
+----
+2026-01-15 09:00:00+00	2026-01-15 09:01:00+00
+2026-01-22 10:30:00+00	2026-01-22 10:30:00.000001+00
+
+statement ok
+SET tick_now = '2026-01-31 10:30:00+00';
+
+query II
+FROM tick_intervals('[$today + 1M]');
+----
+2026-02-28 00:00:00+00	2026-03-01 00:00:00+00
+
+statement ok
+SET tick_now = '2026-01-24 10:30:00+00';
+
+# from a Saturday
+query II
+FROM tick_intervals('[$today + 1bd, $today - 1bd]');
+----
+2026-01-23 00:00:00+00	2026-01-24 00:00:00+00
+2026-01-26 00:00:00+00	2026-01-27 00:00:00+00
+
+statement ok
+SET tick_now = '2026-01-22 10:30:00+00';
+
+statement error
+FROM tick_intervals('$invalid');
+----
+Unknown date variable: invalid
+
+statement error
+FROM tick_intervals('$now,$tomorrow');
+----
+comma-separated date lists require brackets
+
+statement error
+FROM tick_intervals('[$today * 5d]');
+----
+Expected '+' or '-' operator
+
+statement error
+FROM tick_intervals('[$today + 5]');
+----
+Expected time unit after number
+
+statement error
+FROM tick_intervals('[$today + 5x]');
+----
+Invalid time unit: x
+
+statement error
+FROM tick_intervals('$today - 1d + 2h');
+----
+Unexpected characters after unit
+
+# --- ranges ---
+
+query II
+FROM tick_intervals('$today..$today+5d');
+----
+2026-01-22 00:00:00+00	2026-01-28 00:00:00+00
+
+query II
+FROM tick_intervals('[$today..$today+5bd]');
+----
+2026-01-22 00:00:00+00	2026-01-24 00:00:00+00
+2026-01-26 00:00:00+00	2026-01-30 00:00:00+00
+
+query II
+FROM tick_intervals('[$now..$tomorrow]');
+----
+2026-01-22 00:00:00+00	2026-01-24 00:00:00+00
+
+query II
+FROM tick_intervals('[$now - 2h..$now]');
+----
+2026-01-22 08:30:00+00	2026-01-22 10:30:00.000001+00
+
+query II
+FROM tick_intervals('[$now - 2h..$now]@America/New_York');
+----
+2026-01-22 13:30:00+00	2026-01-22 15:30:00.000001+00
+
+query II
+FROM tick_intervals('[$now - 2h..$now@+05:00]@America/New_York');
+----
+2026-01-22 03:30:00+00	2026-01-22 05:30:00.000001+00
+
+query II
+FROM tick_intervals('[$today..$today+3d]T09:00;1h');
+----
+2026-01-22 09:00:00+00	2026-01-22 10:00:00+00
+2026-01-23 09:00:00+00	2026-01-23 10:00:00+00
+2026-01-24 09:00:00+00	2026-01-24 10:00:00+00
+2026-01-25 09:00:00+00	2026-01-25 10:00:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('[$today..$today+2d]T[09:00,14:00]');
+----
+6
+
+query II
+FROM tick_intervals('[$today..$today+1d]T09:[00,30]');
+----
+2026-01-22 09:00:00+00	2026-01-22 09:01:00+00
+2026-01-22 09:30:00+00	2026-01-22 09:31:00+00
+2026-01-23 09:00:00+00	2026-01-23 09:01:00+00
+2026-01-23 09:30:00+00	2026-01-23 09:31:00+00
+
+query II
+FROM tick_intervals('[$today..$today+2d]@+05:00');
+----
+2026-01-21 19:00:00+00	2026-01-24 19:00:00+00
+
+query II
+FROM tick_intervals('[$today..$today+10d]#workday');
+----
+2026-01-22 00:00:00+00	2026-01-24 00:00:00+00
+2026-01-26 00:00:00+00	2026-01-31 00:00:00+00
+
+query II
+FROM tick_intervals('[$today-2d..$today, $today+10d..$today+12d]');
+----
+2026-01-20 00:00:00+00	2026-01-23 00:00:00+00
+2026-02-01 00:00:00+00	2026-02-04 00:00:00+00
+
+statement ok
+SET tick_now = '2026-01-26 10:30:00+00';
+
+# a bracketed business-day range is one interval per business day
+query II
+FROM tick_intervals('[$today-5bd..$today-1bd]T09:30');
+----
+2026-01-19 09:30:00+00	2026-01-19 09:31:00+00
+2026-01-20 09:30:00+00	2026-01-20 09:31:00+00
+2026-01-21 09:30:00+00	2026-01-21 09:31:00+00
+2026-01-22 09:30:00+00	2026-01-22 09:31:00+00
+2026-01-23 09:30:00+00	2026-01-23 09:31:00+00
+
+statement ok
+SET tick_now = '2026-01-22 10:30:00+00';
+
+statement error
+FROM tick_intervals('[$today+5d..$today]');
+----
+Invalid date range: start is after end
+
+statement error
+FROM tick_intervals('[$today..]');
+----
+Empty end expression in date range
+
+statement error
+FROM tick_intervals('[$today#workday..$tomorrow]');
+----
+Invalid day name: workday..$tomorrow
+
+# --- bracket expansion ---
+
+query II
+FROM tick_intervals('2018-[01,06]-[10,15]');
+----
+2018-01-10 00:00:00+00	2018-01-11 00:00:00+00
+2018-01-15 00:00:00+00	2018-01-16 00:00:00+00
+2018-06-10 00:00:00+00	2018-06-11 00:00:00+00
+2018-06-15 00:00:00+00	2018-06-16 00:00:00+00
+
+query II
+FROM tick_intervals('2018-01-[5,10..12,20]');
+----
+2018-01-05 00:00:00+00	2018-01-06 00:00:00+00
+2018-01-10 00:00:00+00	2018-01-13 00:00:00+00
+2018-01-20 00:00:00+00	2018-01-21 00:00:00+00
+
+query II
+FROM tick_intervals('2018-01-[ 10 .. 12 ]');
+----
+2018-01-10 00:00:00+00	2018-01-13 00:00:00+00
+
+query II
+FROM tick_intervals('[2018,2019]-01-10');
+----
+2018-01-10 00:00:00+00	2018-01-11 00:00:00+00
+2019-01-10 00:00:00+00	2019-01-11 00:00:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('[1970..2170]-01-01');
+----
+201
+
+query II
+FROM tick_intervals('2018-01-10T[10,14]:30');
+----
+2018-01-10 10:30:00+00	2018-01-10 10:31:00+00
+2018-01-10 14:30:00+00	2018-01-10 14:31:00+00
+
+query II
+FROM tick_intervals('2018-01-10T10:30:00.[100,200]');
+----
+2018-01-10 10:30:00.1+00	2018-01-10 10:30:00.101+00
+2018-01-10 10:30:00.2+00	2018-01-10 10:30:00.201+00
+
+query II
+FROM tick_intervals('2024-01-15T[09:00,09:01]');
+----
+2024-01-15 09:00:00+00	2024-01-15 09:02:00+00
+
+query II
+FROM tick_intervals('2024-01-15T[09,14:29]');
+----
+2024-01-15 09:00:00+00	2024-01-15 10:00:00+00
+2024-01-15 14:29:00+00	2024-01-15 14:30:00+00
+
+query II
+FROM tick_intervals('2024-01-15T[09:00,14:30]:[00,30];1h');
+----
+2024-01-15 09:00:00+00	2024-01-15 10:00:30+00
+2024-01-15 14:30:00+00	2024-01-15 15:30:30+00
+
+query I
+SELECT count(*) FROM tick_intervals('[2024-01-15,2024-01-16]T[09:00,14:30]:[00,30]');
+----
+8
+
+query II
+FROM tick_intervals('[2025-12-31,2026-01-[03..05]]');
+----
+2025-12-31 00:00:00+00	2026-01-01 00:00:00+00
+2026-01-03 00:00:00+00	2026-01-06 00:00:00+00
+
+query II
+FROM tick_intervals('[2026-01-01T09:30, 2026-01-02]T10:00;1h');
+----
+2026-01-01 09:30:00+00	2026-01-01 10:30:00+00
+2026-01-02 10:00:00+00	2026-01-02 11:00:00+00
+
+query II
+FROM tick_intervals('[2025-01-20,2025-01-05,2025-01-05]');
+----
+2025-01-05 00:00:00+00	2025-01-06 00:00:00+00
+2025-01-20 00:00:00+00	2025-01-21 00:00:00+00
+
+statement error
+FROM tick_intervals('2018-01-[15..10]');
+----
+Range must be ascending: 15..10
+
+statement error
+FROM tick_intervals('2018-01-[]');
+----
+Empty bracket expansion
+
+statement error
+FROM tick_intervals('2018-01-[10..]');
+----
+Expected number after '..'
+
+statement error
+FROM tick_intervals('2018-01-[abc]');
+----
+Expected number in bracket expansion
+
+statement error
+FROM tick_intervals('2018-01-[10.5]');
+----
+Expected ',' or end of bracket
+
+statement error
+FROM tick_intervals('2018-01-[10,15');
+----
+Unclosed '[' in interval
+
+statement error
+FROM tick_intervals('2024-01-15T[0900,1430]');
+----
+Military time format not supported
+
+statement error
+FROM tick_intervals('2024-01-15T[09:[00,30],14:30]');
+----
+Nested brackets not supported in time list
+
+statement error
+FROM tick_intervals('2024-01-15T[09:00,,14:30];6h');
+----
+Empty element in time list
+
+statement error
+FROM tick_intervals('[2025-01-01,,2025-01-02]');
+----
+Empty element in date list
+
+statement error
+FROM tick_intervals('[]');
+----
+Empty date list
+
+# --- time zones ---
+
+query II
+FROM tick_intervals('2024-01-15T08:00@+03:00');
+----
+2024-01-15 05:00:00+00	2024-01-15 05:01:00+00
+
+query II
+FROM tick_intervals('2024-01-15T08:00@+14:00');
+----
+2024-01-14 18:00:00+00	2024-01-14 18:01:00+00
+
+query II
+FROM tick_intervals('2024-07-15T08:00@Europe/London');
+----
+2024-07-15 07:00:00+00	2024-07-15 07:01:00+00
+
+# a time in the DST gap moves forward by the gap, as in DuckDB's casts (QuestDB snaps to 03:00 instead)
+query II
+FROM tick_intervals('2024-03-10T02:30@America/New_York');
+----
+2024-03-10 07:30:00+00	2024-03-10 07:31:00+00
+
+# an ambiguous time takes the daylight-saving offset
+query II
+FROM tick_intervals('2024-11-03T01:30@America/New_York');
+----
+2024-11-03 05:30:00+00	2024-11-03 05:31:00+00
+
+query II
+FROM tick_intervals('2024-01-15T08:00@+03:00;1h');
+----
+2024-01-15 05:00:00+00	2024-01-15 06:00:00+00
+
+query II
+FROM tick_intervals('2024-01-15T[09:00@+05:00,08:00@+02:00];1h');
+----
+2024-01-15 04:00:00+00	2024-01-15 05:00:00+00
+2024-01-15 06:00:00+00	2024-01-15 07:00:00+00
+
+query II
+FROM tick_intervals('2024-01-15T[09:00@UTC,14:30]@+02:00;1h');
+----
+2024-01-15 09:00:00+00	2024-01-15 10:00:00+00
+2024-01-15 12:30:00+00	2024-01-15 13:30:00+00
+
+query II
+FROM tick_intervals('[2024-01-15@UTC,2024-01-16]T08:00@+03:00');
+----
+2024-01-15 08:00:00+00	2024-01-15 08:01:00+00
+2024-01-16 05:00:00+00	2024-01-16 05:01:00+00
+
+query II
+FROM tick_intervals('[2024-01-15@Europe/London,2024-07-15@Europe/London]T08:00');
+----
+2024-01-15 08:00:00+00	2024-01-15 08:01:00+00
+2024-07-15 07:00:00+00	2024-07-15 07:01:00+00
+
+# the day filter applies to the local date
+query II
+FROM tick_intervals('[2024-01-01@+14:00]#Mon');
+----
+2023-12-31 10:00:00+00	2024-01-01 10:00:00+00
+
+query II
+FROM tick_intervals('2024-01-[01..07]T09:00@+02:00#workday;1h');
+----
+2024-01-01 07:00:00+00	2024-01-01 08:00:00+00
+2024-01-02 07:00:00+00	2024-01-02 08:00:00+00
+2024-01-03 07:00:00+00	2024-01-03 08:00:00+00
+2024-01-04 07:00:00+00	2024-01-04 08:00:00+00
+2024-01-05 07:00:00+00	2024-01-05 08:00:00+00
+
+statement error
+FROM tick_intervals('2024-01-15T08:00@InvalidZone');
+----
+Invalid timezone: InvalidZone
+
+statement error
+FROM tick_intervals('2024-01-15T08:00@');
+----
+Invalid timezone
+
+# --- day filters ---
+
+query II
+FROM tick_intervals('2024-01-[01..07]#workday');
+----
+2024-01-01 00:00:00+00	2024-01-06 00:00:00+00
+
+query II
+FROM tick_intervals('2024-01-[01..07]#WEEKEND');
+----
+2024-01-06 00:00:00+00	2024-01-08 00:00:00+00
+
+query II
+FROM tick_intervals('2024-01-[01..07]#Mon,Wed,Fri');
+----
+2024-01-01 00:00:00+00	2024-01-02 00:00:00+00
+2024-01-03 00:00:00+00	2024-01-04 00:00:00+00
+2024-01-05 00:00:00+00	2024-01-06 00:00:00+00
+
+query II
+FROM tick_intervals('2024-01-[01..07]#Monday,Wednesday');
+----
+2024-01-01 00:00:00+00	2024-01-02 00:00:00+00
+2024-01-03 00:00:00+00	2024-01-04 00:00:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('2022#Tue');
+----
+52
+
+query I
+SELECT count(*) FROM tick_intervals('2024-12#Mon');
+----
+5
+
+query I
+SELECT count(*) FROM tick_intervals('2024-01-01#Tue');
+----
+0
+
+query II
+FROM tick_intervals('[2024-01-01#Mon,2024-01-06]#Sat');
+----
+2024-01-01 00:00:00+00	2024-01-02 00:00:00+00
+2024-01-06 00:00:00+00	2024-01-07 00:00:00+00
+
+query II
+FROM tick_intervals('$today#Thu');
+----
+2026-01-22 00:00:00+00	2026-01-23 00:00:00+00
+
+# unlike QuestDB, the days a filter selects from a week are merged
+query II
+FROM tick_intervals('2024-W01#workday');
+----
+2024-01-01 00:00:00+00	2024-01-06 00:00:00+00
+
+statement error
+FROM tick_intervals('2024-01-01#');
+----
+Empty day filter after '#'
+
+statement error
+FROM tick_intervals('2024-01-01#invalid');
+----
+Invalid day name: invalid
+
+statement error
+FROM tick_intervals('2024-01-01#XNYS');
+----
+Invalid day name: XNYS
+
+statement error
+FROM tick_intervals('2024-01-01#,,,');
+----
+Invalid day filter: ,,,
+
+# --- ISO weeks ---
+
+query II
+FROM tick_intervals('2024-W01');
+----
+2024-01-01 00:00:00+00	2024-01-08 00:00:00+00
+
+query II
+FROM tick_intervals('2020-W01');
+----
+2019-12-30 00:00:00+00	2020-01-06 00:00:00+00
+
+query II
+FROM tick_intervals('2020-W53');
+----
+2020-12-28 00:00:00+00	2021-01-04 00:00:00+00
+
+query II
+FROM tick_intervals('2024-W01-5');
+----
+2024-01-05 00:00:00+00	2024-01-06 00:00:00+00
+
+query II
+FROM tick_intervals('2024-W01-1T09:30:15.1');
+----
+2024-01-01 09:30:15.1+00	2024-01-01 09:30:15.2+00
+
+query II
+FROM tick_intervals('2024-W01-1 09:00');
+----
+2024-01-01 09:00:00+00	2024-01-01 09:01:00+00
+
+query II
+FROM tick_intervals('2024-W[01..04]');
+----
+2024-01-01 00:00:00+00	2024-01-29 00:00:00+00
+
+query II
+FROM tick_intervals('2024-W[01,02]-[1,5]');
+----
+2024-01-01 00:00:00+00	2024-01-02 00:00:00+00
+2024-01-05 00:00:00+00	2024-01-06 00:00:00+00
+2024-01-08 00:00:00+00	2024-01-09 00:00:00+00
+2024-01-12 00:00:00+00	2024-01-13 00:00:00+00
+
+query I
+SELECT count(*) FROM tick_intervals('2024-W[01..52]-1T09:00;1h');
+----
+52
+
+statement error
+FROM tick_intervals('2024-W53');
+----
+Invalid date
+
+statement error
+FROM tick_intervals('2024-W01-8');
+----
+Invalid date
+
+# --- the documentation's examples ---
+
+query I
+SELECT count(*) FROM tick_intervals('[2025-01]T09:30@America/New_York#workday;6h30m');
+----
+23
+
+query II
+FROM tick_intervals('[2025-01]T09:30@America/New_York#workday;6h30m') LIMIT 1;
+----
+2025-01-01 14:30:00+00	2025-01-01 21:00:00+00
+
+query II
+FROM tick_intervals('2024-[01,04,07,10]-[01..07]T02:00#Sun;6h');
+----
+2024-01-07 02:00:00+00	2024-01-07 08:00:00+00
+2024-04-07 02:00:00+00	2024-04-07 08:00:00+00
+2024-07-07 02:00:00+00	2024-07-07 08:00:00+00
+2024-10-06 02:00:00+00	2024-10-06 08:00:00+00
+
+query II
+FROM tick_intervals('[$now - 4h, $now - 3h, $now - 2h, $now - 1h, $now];5m');
+----
+2026-01-22 06:30:00+00	2026-01-22 06:35:00+00
+2026-01-22 07:30:00+00	2026-01-22 07:35:00+00
+2026-01-22 08:30:00+00	2026-01-22 08:35:00+00
+2026-01-22 09:30:00+00	2026-01-22 09:35:00+00
+2026-01-22 10:30:00+00	2026-01-22 10:35:00+00
