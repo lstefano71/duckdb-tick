@@ -19,12 +19,20 @@ WHERE ts IN '[$today - 5bd..$today - 1bd]T09:30@America/New_York;1m';
 
 ## How it works
 
-DuckDB v2.0 parses SQL with an extensible PEG grammar. `tick` registers a grammar extension that adds one
-alternative to the `IN` predicate: when the right-hand side is a single string literal, `x IN '...'` is
-parsed as `tick_in(x, '...')` (and `x NOT IN '...'` as `NOT tick_in(x, '...')`).
+DuckDB v2.0 parses SQL with an extensible PEG grammar. `tick` registers a grammar extension that changes how
+`x IN <expr>` is transformed: when the right-hand side is a bare string literal, `x IN '...'` becomes
+`tick_in(x, '...')` (and `x NOT IN '...'` becomes `NOT tick_in(x, '...')`). Anything else keeps DuckDB's
+meaning, so `'ell' IN 'hello'` is still a substring test.
 
-When the pattern is a constant, `tick_in` is expanded at bind time into a disjunction of half-open ranges,
-`(x >= lo AND x < hi) OR ...`, so DuckDB's ordinary filter pushdown and zone-map pruning apply.
+The pattern is expanded once, at bind time, into a sorted list of half-open intervals. `tick_in` is pushed
+into scans as a filter and implements DuckDB's statistics pruning callback, so Parquet row groups (local or
+on S3) and native table row groups whose min/max cannot match are skipped without being read:
+
+```text
+Table Scan  PARQUET_SCAN
+  Filters: tick_in(ts, '2024-03-15')
+  Row Groups Scanned: 1 / 52
+```
 
 ## Syntax
 
@@ -53,8 +61,12 @@ Not supported: exchange calendars (`#XNYS` and other ISO 10383 codes), a QuestDB
 
 ## DuckDB specifics
 
-- **Activation.** Loading the extension enables the grammar for the current and future connections.
-  It can be switched off per connection with `SET active_grammar_extensions = []`.
+- **Activation.** `LOAD tick` enables the syntax on the loading connection from its next statement, and on
+  every connection opened afterwards. It can be switched off per connection with
+  `SET active_grammar_extensions = []`. Two caveats, both inherent to how DuckDB switches grammars:
+  statements sent in the same batch as `LOAD tick` are parsed before it takes effect, and connections that
+  were already open (or that loaded the extension through the C/C++ API) pick it up after their next
+  statement — run `SET active_grammar_extensions = ['tick']` to enable it immediately.
 - **Time zones follow DuckDB.** Unlike QuestDB, which is UTC throughout, a pattern without `@timezone`
   is read in the session's `TimeZone` setting, and plain `TIMESTAMP` / `TIMESTAMP_NS` values are treated
   as wall-clock times in that zone. `TIMESTAMPTZ` values are absolute instants. `SET TimeZone = 'UTC'`

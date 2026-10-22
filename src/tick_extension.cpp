@@ -2,10 +2,14 @@
 
 #include "tick_extension.hpp"
 #include "duckdb.hpp"
+#include "tick_functions.hpp"
+#include "tick_grammar.hpp"
 
 namespace duckdb {
 
 static void LoadInternal(ExtensionLoader &loader) {
+	RegisterTickFunctions(loader);
+	RegisterTickGrammar(loader);
 }
 
 void TickExtension::Load(ExtensionLoader &loader) {

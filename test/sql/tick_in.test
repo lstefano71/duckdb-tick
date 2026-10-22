@@ -1,0 +1,83 @@
+# name: test/sql/tick_in.test
+# description: x IN '<pattern>' is parsed as tick_in(x, '<pattern>')
+# group: [sql]
+
+require tick
+
+# `require` loads through the C++ API while this connection is idle, so it only picks up the grammar after its
+# next statement; connections opened later (con2 below) get it straight away
+statement ok
+SET active_grammar_extensions = ['tick'];
+
+query III
+SELECT TIMESTAMP '2024-01-15 09:30' IN '2024-01-15',
+       TIMESTAMP '2024-01-15 00:00' IN '2024-01-15',
+       TIMESTAMP '2024-01-16 00:00' IN '2024-01-15';
+----
+true	true	false
+
+query I
+SELECT TIMESTAMP '2024-01-16 00:00' NOT IN '2024-01-15';
+----
+true
+
+query I
+SELECT tick_in(TIMESTAMP '2024-01-15 23:59:59.999999', '2024-01-15');
+----
+true
+
+query I
+SELECT NULL::TIMESTAMP IN '2024-01-15';
+----
+NULL
+
+# a string on the left keeps DuckDB's substring meaning
+query II
+SELECT 'ell' IN 'hello', 'xyz' IN 'hello';
+----
+true	false
+
+# only a bare literal is a TICK pattern: an expression keeps the contains meaning
+query I
+SELECT 'ell' IN 'he' || 'llo';
+----
+true
+
+statement ok
+CREATE TABLE trades AS
+SELECT TIMESTAMP '2024-01-14 00:00' + INTERVAL (i) HOUR AS ts FROM range(72) t(i);
+
+query I
+SELECT count(*) FROM trades WHERE ts IN '2024-01-15';
+----
+24
+
+query II
+SELECT min(ts), max(ts) FROM trades WHERE ts IN '2024-01-15';
+----
+2024-01-15 00:00:00	2024-01-15 23:00:00
+
+statement error
+SELECT TIMESTAMP '2024-01-15' IN '2024-13-01';
+----
+Invalid TICK pattern
+
+# the grammar is active on other connections too
+query I con2
+SELECT count(*) FROM trades WHERE ts IN '2024-01-16';
+----
+24
+
+# and can be switched off per connection
+statement ok con2
+SET active_grammar_extensions = [];
+
+statement error con2
+SELECT count(*) FROM trades WHERE ts IN '2024-01-16';
+----
+contains
+
+query I
+SELECT count(*) FROM trades WHERE ts IN '2024-01-16';
+----
+24

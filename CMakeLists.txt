@@ -12,7 +12,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/tick_extension.cpp)
+set(EXTENSION_SOURCES src/tick_extension.cpp src/tick_functions.cpp src/tick_grammar.cpp
+                      src/tick_pattern.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})
